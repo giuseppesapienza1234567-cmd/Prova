@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#111" />
   <title>Flipbook PDF – Pro</title>
 
-  <!-- Foglio di stile del viewer -->
-  <link rel="stylesheet" href="./viewer.css?v=20250817">
+  <!-- CSS del viewer -->
+  <link rel="stylesheet" href="./viewer.css?v=1">
   <noscript>
     <style>
       body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
@@ -39,7 +39,6 @@
         </select>
         <div class="divider"></div>
         <button id="fullscreenBtn" class="btn" aria-label="Schermo intero" title="Schermo intero">⤢</button>
-        <button id="moreBtn" class="btn" aria-label="Altro" title="Opzioni">⋯</button>
       </div>
     </div>
 
@@ -58,7 +57,7 @@
       <div id="errorBox" class="error" hidden></div>
     </div>
 
-    <!-- (Opzionale) test normalizzazione URL -->
+    <!-- (Opzionale) test normalizzazione URL (per Drive/Dropbox, qui non serve ma utile) -->
     <details class="tests"><summary>Test integrati URL normalizer</summary><ul id="testResults"></ul></details>
 
     <!-- Hint ambiente (es. se aperto da file://) -->
@@ -67,10 +66,10 @@
     <noscript><div class="nojs">Questo viewer richiede JavaScript attivo.</div></noscript>
   </div>
 
-  <!-- PDF.js (deve essere caricato PRIMA del tuo script) -->
+  <!-- PDF.js (caricare PRIMA del tuo script) -->
   <script src="https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
 
   <!-- Logica del viewer -->
-  <script defer src="./viewer.js?v=20250817"></script>
+  <script defer src="./viewer.js?v=1"></script>
 </body>
 </html>

@@ -3,15 +3,15 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@3.11.174/
 
 // ===== Config iniziale =====
 const params = new URLSearchParams(location.search);
-const srcParam = params.get('src');
+const srcParam  = params.get('src');
 const pageParam = parseInt(params.get('page') || '1', 10);
 
-// Cambia qui se il file ha nome diverso (rispetta maiuscole/minuscole)
+// IMPORTANTE: qui uso il nome esatto del tuo file (V maiuscola)
 const FALLBACK_PDF_URL = './Volantino.pdf';
 
 const ORIGINAL_URL = srcParam || FALLBACK_PDF_URL || '';
 
-// Normalizza URL Drive/Dropbox in diretto scaricabile
+// Normalizza URL Drive/Dropbox in diretto scaricabile (utile se userai ?src=)
 function normalizeUrl(u){
   try{
     const url = new URL(u);
@@ -32,9 +32,9 @@ function normalizeUrl(u){
 const PDF_URL = ORIGINAL_URL ? normalizeUrl(ORIGINAL_URL) : '';
 
 // ===== Stato / riferimenti DOM =====
-const stage = document.getElementById('stage');
-const sheets = { A: document.getElementById('sheetA'), B: document.getElementById('sheetB') };
-const canvases = { A: document.getElementById('canvasA'), B: document.getElementById('canvasB') };
+const stage   = document.getElementById('stage');
+const sheets  = { A: document.getElementById('sheetA'), B: document.getElementById('sheetB') };
+const canvases= { A: document.getElementById('canvasA'), B: document.getElementById('canvasB') };
 
 const pageCountEl = document.getElementById('pageCount');
 const pageInput   = document.getElementById('pageInput');
@@ -42,19 +42,18 @@ const pageInput   = document.getElementById('pageInput');
 const prevBtn = document.getElementById('prevBtn');
 const nextBtn = document.getElementById('nextBtn');
 
-const fsBtn   = document.getElementById('fullscreenBtn');
+const fsBtn      = document.getElementById('fullscreenBtn');
 const zoomInBtn  = document.getElementById('zoomInBtn');
 const zoomOutBtn = document.getElementById('zoomOutBtn');
 const zoomLabel  = document.getElementById('zoomLabel');
 const fitModeSel = document.getElementById('fitMode');
-const moreBtn    = document.getElementById('moreBtn'); // facoltativo
 
 const loadingEl = document.getElementById('loading');
 const errorBox  = document.getElementById('errorBox');
 const envHint   = document.getElementById('envHint');
 
 let pdfDoc=null, currentPage=1, totalPages=0, active='A', animating=false;
-let zoom=1;           // zoom utente
+let zoom=1;                 // zoom utente
 let fitMode='fit-width';
 let resizeRaf=null;
 
@@ -81,7 +80,7 @@ function computeScale(page){
   const dpr = Math.max(1, window.devicePixelRatio || 1);
   let scale = fit * zoom * dpr;
 
-  // limita il numero di pixel totali per evitare glitch/memoria
+  // limita pixel totali per evitare glitch/memoria
   const maxPixels = 8e6; // ~8MP
   const estW = baseViewport.width * scale;
   const estH = baseViewport.height * scale;
@@ -112,9 +111,9 @@ async function renderPageToCanvas(pageNumber, canvasEl){
 function updateUi(){
   prevBtn.disabled = currentPage<=1 || animating;
   nextBtn.disabled = currentPage>=totalPages || animating;
-  pageInput.value = String(currentPage);
+  pageInput.value  = String(currentPage);
   pageCountEl.textContent = String(totalPages||'–');
-  zoomLabel.textContent = `${Math.round(zoom*100)}%`;
+  zoomLabel.textContent   = `${Math.round(zoom*100)}%`;
 }
 
 async function goTo(pageNumber, direction){
@@ -211,16 +210,15 @@ async function loadFromUrl(url){
   if(!url){ showError('Nessun URL PDF impostato.'); return; }
   try{
     showLoading(true);
-    // Probe HEAD per segnalare 404 in modo leggibile (non tutti i server lo consentono)
+    // Probe HEAD (stesso dominio -> ok), mostra 404 se percorso errato
     try{
       const head = await fetch(url,{method:'HEAD',cache:'no-store'});
       if(!head.ok) throw new Error(`HTTP ${head.status} ${head.statusText}`);
-    }catch(probeErr){ /* ok, tentiamo comunque */ }
+    }catch{ /* alcuni host non consentono HEAD; si tenta comunque */ }
 
     const doc = await pdfjsLib.getDocument({
       url, withCredentials:false,
-      // disabilito stream/range per compat drive/cors
-      disableRange:true, disableStream:true
+      disableRange:true, disableStream:true // compatibilità più ampia
     }).promise;
 
     pdfDoc = doc; totalPages = doc.numPages; currentPage = clamp(pageParam||1,1,totalPages);
@@ -235,11 +233,9 @@ function showError(html){ errorBox.innerHTML = html; errorBox.hidden = false; sh
 
 function formatError(err,url){
   const isFetch = /Failed to fetch/i.test(String(err?.message||err));
-  const isDrive = /drive\.google\.com|googleusercontent\.com/i.test(url);
   const tips = [];
   if(isFetch) tips.push('Problema di rete o CORS durante il download.');
-  if(isDrive) tips.push('Se usi Drive, assicurati della condivisione pubblica e preferisci l\'URL <code>/uc?export=download</code>.');
-  tips.push('Verifica che il file PDF sia nello stesso percorso di <code>index.html</code> e che il nome coincida (maiuscole/minuscole).');
+  tips.push('Verifica che <code>Volantino.pdf</code> sia nello stesso percorso di <code>index.html</code> e che il nome coincida (maiuscole/minuscole).');
   return `Errore nel caricamento del PDF. ${tips.join(' ')}`;
 }
 

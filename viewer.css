@@ -82,5 +82,8 @@ canvas{display:block;width:100%;height:auto}
 }
 .hint{font-size:12px;color:#666;margin-top:6px}
 
+/* Forza rimozione dal layout quando hidden è presente */
+.loading[hidden], .error[hidden]{ display:none !important; }
+
 /* Debug tests (opzionali) */
 .tests{margin-top:10px}

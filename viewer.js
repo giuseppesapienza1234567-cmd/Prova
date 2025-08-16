@@ -6,12 +6,12 @@ const params = new URLSearchParams(location.search);
 const srcParam  = params.get('src');
 const pageParam = parseInt(params.get('page') || '1', 10);
 
-// IMPORTANTE: qui uso il nome esatto del tuo file (V maiuscola)
+// IMPORTANTE: usa il nome esatto del tuo file (V maiuscola)
 const FALLBACK_PDF_URL = './Volantino.pdf';
 
 const ORIGINAL_URL = srcParam || FALLBACK_PDF_URL || '';
 
-// Normalizza URL Drive/Dropbox in diretto scaricabile (utile se userai ?src=)
+// Normalizza URL Drive/Dropbox (utile solo se userai ?src=)
 function normalizeUrl(u){
   try{
     const url = new URL(u);
@@ -28,7 +28,6 @@ function normalizeUrl(u){
     return u;
   }catch{ return u; }
 }
-
 const PDF_URL = ORIGINAL_URL ? normalizeUrl(ORIGINAL_URL) : '';
 
 // ===== Stato / riferimenti DOM =====
@@ -53,9 +52,7 @@ const errorBox  = document.getElementById('errorBox');
 const envHint   = document.getElementById('envHint');
 
 let pdfDoc=null, currentPage=1, totalPages=0, active='A', animating=false;
-let zoom=1;                 // zoom utente
-let fitMode='fit-width';
-let resizeRaf=null;
+let zoom=1, fitMode='fit-width', resizeRaf=null;
 
 if (window.matchMedia('(pointer: coarse)').matches) { fitMode='fit-width'; }
 fitModeSel.value = fitMode;
@@ -71,16 +68,14 @@ function computeScale(page){
   const containerW = stage.clientWidth;
   const containerH = stage.clientHeight;
   const baseViewport = page.getViewport({ scale: 1 });
-  let fit = 1;
-  if(fitMode==='fit-width'){
-    fit = containerW / baseViewport.width;
-  } else {
-    fit = Math.min(containerW / baseViewport.width, containerH / baseViewport.height);
-  }
+  let fit = (fitMode==='fit-width')
+    ? containerW / baseViewport.width
+    : Math.min(containerW / baseViewport.width, containerH / baseViewport.height);
+
   const dpr = Math.max(1, window.devicePixelRatio || 1);
   let scale = fit * zoom * dpr;
 
-  // limita pixel totali per evitare glitch/memoria
+  // limita i pixel totali per evitare glitch/memoria
   const maxPixels = 8e6; // ~8MP
   const estW = baseViewport.width * scale;
   const estH = baseViewport.height * scale;
@@ -141,7 +136,6 @@ async function goTo(pageNumber, direction){
     stage.classList.remove('anim-left','anim-right');
     active = nextKey; currentPage = target; animating = false; updateUi(); preloadAround();
 
-    // aggiorna URL (pagina) senza ricaricare
     const q = new URLSearchParams(location.search);
     q.set('page', String(currentPage));
     history.replaceState(null,'', `${location.pathname}?${q.toString()}`);
@@ -195,7 +189,10 @@ fitModeSel.addEventListener('change', ()=>{ fitMode = fitModeSel.value; rerender
 
 function rerenderActive(){
   updateUi();
-  renderPageToCanvas(currentPage, canvases[active]);
+  renderPageToCanvas(currentPage, canvases[active]).catch(err=>{
+    console.error(err);
+    showError('Errore nel render della pagina.');
+  });
 }
 
 function onResize(){
@@ -208,8 +205,8 @@ window.addEventListener('orientationchange', onResize);
 // === Caricamento PDF ===
 async function loadFromUrl(url){
   if(!url){ showError('Nessun URL PDF impostato.'); return; }
+  showLoading(true);
   try{
-    showLoading(true);
     // Probe HEAD (stesso dominio -> ok), mostra 404 se percorso errato
     try{
       const head = await fetch(url,{method:'HEAD',cache:'no-store'});
@@ -223,9 +220,19 @@ async function loadFromUrl(url){
 
     pdfDoc = doc; totalPages = doc.numPages; currentPage = clamp(pageParam||1,1,totalPages);
     pageCountEl.textContent = String(totalPages);
+
+    // Nascondo il loader PRIMA del primo render (evita overlay “appiccicato” se la pagina è pesante)
+    showLoading(false);
+
     await renderPageToCanvas(currentPage, canvases[active]);
-    showLoading(false); updateUi(); preloadAround();
-  }catch(err){ console.error(err); showError(formatError(err, url)); }
+    updateUi(); preloadAround();
+  }catch(err){
+    console.error(err);
+    showError(formatError(err, url));
+  } finally {
+    // Fail-safe: se per qualunque motivo è ancora visibile, chiudilo.
+    setTimeout(()=>{ if (loadingEl && !loadingEl.hidden && pdfDoc) showLoading(false); }, 1200);
+  }
 }
 
 function showLoading(v){ loadingEl.hidden = !v; if(v) errorBox.hidden=true; }
@@ -238,21 +245,6 @@ function formatError(err,url){
   tips.push('Verifica che <code>Volantino.pdf</code> sia nello stesso percorso di <code>index.html</code> e che il nome coincida (maiuscole/minuscole).');
   return `Errore nel caricamento del PDF. ${tips.join(' ')}`;
 }
-
-// === Test normalizer (opzionale, visibile in <details>) ===
-(function runTests(){
-  const ul = document.getElementById('testResults');
-  if(!ul) return;
-  const cases=[
-    {name:'Drive /file/d/ID/view', in:'https://drive.google.com/file/d/1TESTID234/view?usp=sharing', out:'https://drive.google.com/uc?export=download&id=1TESTID234'},
-    {name:'Drive open?id=ID', in:'https://drive.google.com/open?id=ABCDEF', out:'https://drive.google.com/uc?export=download&id=ABCDEF'},
-    {name:'Dropbox dl=0', in:'https://www.dropbox.com/s/xyz/file.pdf?dl=0', out:'https://www.dropbox.com/s/xyz/file.pdf?raw=1'},
-    {name:'Già /uc?export=download', in:'https://drive.google.com/uc?export=download&id=SAME', out:'https://drive.google.com/uc?export=download&id=SAME'}
-  ];
-  let pass=0; const li=s=>{const el=document.createElement('li'); el.innerHTML=s; return el;};
-  cases.forEach(tc=>{ const got=normalizeUrl(tc.in); const ok=got===tc.out; if(ok) pass++; ul.appendChild(li(`${ok?'✅':'❌'} <b>${tc.name}</b> → <code>${got}</code>`)); });
-  ul.appendChild(li(`<b>Totale:</b> ${pass}/${cases.length} passati`));
-})();
 
 // Avvio
 loadFromUrl(PDF_URL);

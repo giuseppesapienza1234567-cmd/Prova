@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Flipbook PDF</title>
+  <style>
+    :root {
+      --ui-radius: 14px;
+      --shadow: 0 10px 30px rgba(0,0,0,.10);
+      --accent: #111;
+      --anim-ms: 600ms;
+    }
+    html, body { height: 100%; }
+    body {
+      margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      background: #f6f7f9; color: #111; -webkit-font-smoothing: antialiased;
+      display: grid; place-items: center;
+    }
+    #app { width: min(920px, 100%); padding: 16px; }
+
+    /* Toolbar */
+    .toolbar {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 12px; background: #fff; border-radius: var(--ui-radius);
+      padding: 8px 12px; box-shadow: var(--shadow); margin-bottom: 14px;
+      position: sticky; top: 8px; z-index: 5;
+    }
+    .group { display: flex; align-items: center; gap: 8px; }
+    .btn {
+      appearance: none; border: 1px solid #ccc; background: #fff; color: #111;
+      border-radius: 10px; padding: 10px 12px; font-size: 14px; line-height: 1;
+      cursor: pointer; transition: transform .08s ease, background .2s ease, border-color .2s ease;
+    }
+    .btn:active { transform: translateY(1px); }
+    .btn[disabled] { opacity: .45; cursor: not-allowed; }
+    .counter { font-weight: 600; letter-spacing: .2px; }
+
+    /* Stage / Book */
+    .stage {
+      position: relative; width: min(900px, 96vw); margin-inline: auto;
+      aspect-ratio: 3/4; /* reasonable default; will be resized after first render */
+      background: #fff; border-radius: var(--ui-radius); box-shadow: var(--shadow);
+      overflow: hidden; perspective: 1600px; transform-style: preserve-3d;
+    }
+    .sheet {
+      position: absolute; inset: 0; display: grid; place-items: center;
+      transform-style: preserve-3d; backface-visibility: hidden;
+    }
+    canvas { display: block; width: 100%; height: auto; }
+
+    /* Subtle page shine during flip */
+    .shine { position: absolute; inset: 0; pointer-events: none; mix-blend-mode: multiply; opacity: 0; }
+    .shine::before { content: ""; position: absolute; inset: 0;
+      background: linear-gradient(90deg, rgba(0,0,0,0) 0%, rgba(0,0,0,.10) 50%, rgba(0,0,0,0) 100%);
+      transform: translateX(-30%);
+    }
+
+    /* Animations */
+    @keyframes turnLeftCurrent { from { transform: rotateY(0deg); } to { transform: rotateY(-180deg); } }
+    @keyframes turnLeftNext { from { transform: rotateY(180deg); } to { transform: rotateY(0deg); } }
+    @keyframes turnRightCurrent { from { transform: rotateY(0deg); } to { transform: rotateY(180deg); } }
+    @keyframes turnRightNext { from { transform: rotateY(-180deg); } to { transform: rotateY(0deg); } }
+
+    .book.anim-left .sheet.current { transform-origin: left center; animation: turnLeftCurrent var(--anim-ms) ease both; z-index: 2; }
+    .book.anim-left .sheet.next    { transform-origin: right center; animation: turnLeftNext var(--anim-ms) ease both; z-index: 1; }
+    .book.anim-right .sheet.current { transform-origin: right center; animation: turnRightCurrent var(--anim-ms) ease both; z-index: 2; }
+    .book.anim-right .sheet.next    { transform-origin: left center; animation: turnRightNext var(--anim-ms) ease both; z-index: 1; }
+
+    .book.anim-left .sheet.current .shine,
+    .book.anim-right .sheet.current .shine { opacity: .8; transition: opacity calc(var(--anim-ms) * .8) ease; }
+
+    /* Helpers */
+    .sr { position: absolute; width: 1px; height: 1px; margin: -1px; border: 0; padding: 0; white-space: nowrap; clip-path: inset(50%); clip: rect(0 0 0 0); overflow: hidden; }
+    .loading { text-align: center; padding: 10px; color: #555; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div class="toolbar">
+      <div class="group">
+        <button id="prevBtn" class="btn" aria-label="Pagina precedente">◀︎</button>
+        <button id="nextBtn" class="btn" aria-label="Pagina successiva">▶︎</button>
+      </div>
+      <div class="group">
+        <span class="counter"><span id="pageNum">–</span>/<span id="pageCount">–</span></span>
+      </div>
+      <div class="group">
+        <button id="fullscreenBtn" class="btn" aria-label="Schermo intero">⤢</button>
+      </div>
+    </div>
+
+    <div id="stage" class="stage book">
+      <div id="sheetA" class="sheet"><canvas id="canvasA"></canvas><div class="shine"></div></div>
+      <div id="sheetB" class="sheet"><canvas id="canvasB"></canvas><div class="shine"></div></div>
+      <div id="loading" class="loading" aria-live="polite">Caricamento…</div>
+    </div>
+
+    <p class="sr">Suggerimento: puoi usare anche le frecce della tastiera o fare swipe a sinistra/destra.</p>
+  </div>
+
+  <!-- PDF.js (via CDN). Se preferisci, puoi servirlo localmente. -->
+  <script src="https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+  <script>
+    // Imposta il worker di PDF.js
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+
+    // 1) PUNTA QUI IL TUO PDF
+    // Opzione A: passa ?src=URL_DEL_TUO_PDF all'indirizzo della pagina
+    // Opzione B: incolla qui sotto il link permanente al PDF
+    const FALLBACK_PDF_URL = './volantino.pdf';  // es: https://drive.google.com/uc?export=download&id=FILE_ID
+
+    // Piccola utility: normalizza i link Google Drive/Dropbox in URL diretti scaricabili
+    function normalizeUrl(u) {
+      try {
+        const url = new URL(u);
+        // Google Drive formati supportati
+        if (url.hostname.includes('drive.google.com')) {
+          // /file/d/{id}/view
+          const m = url.pathname.match(/\/file\/d\/([^/]+)/);
+          if (m) return `https://drive.google.com/uc?export=download&id=${m[1]}`;
+          // /uc?export=download&id=...
+          if (url.pathname.includes('/uc')) return u;
+        }
+        // Dropbox: dl=0 -> raw=1
+        if (url.hostname.includes('dropbox.com')) {
+          url.searchParams.set('raw', '1');
+          url.searchParams.delete('dl');
+          return url.toString();
+        }
+        return u;
+      } catch { return u; }
+    }
+
+    const params = new URLSearchParams(location.search);
+    const srcParam = params.get('src');
+    const PDF_URL = normalizeUrl(srcParam || FALLBACK_PDF_URL);
+
+    // Stato dell'app
+    const stage = document.getElementById('stage');
+    const sheets = {
+      A: document.getElementById('sheetA'),
+      B: document.getElementById('sheetB')
+    };
+    const canvases = {
+      A: document.getElementById('canvasA'),
+      B: document.getElementById('canvasB')
+    };
+    const pageNumEl = document.getElementById('pageNum');
+    const pageCountEl = document.getElementById('pageCount');
+    const prevBtn = document.getElementById('prevBtn');
+    const nextBtn = document.getElementById('nextBtn');
+    const fsBtn   = document.getElementById('fullscreenBtn');
+    const loadingEl = document.getElementById('loading');
+
+    let pdfDoc = null;
+    let currentPage = 1;
+    let totalPages = 0;
+    let active = 'A'; // foglio attivo (A/B)
+    let animating = false;
+
+    function clamp(n, min, max){ return Math.max(min, Math.min(max, n)); }
+
+    // Calcola scale per adattare il canvas alla larghezza disponibile
+    function computeScale(page) {
+      const containerW = stage.clientWidth; // CSS px
+      const viewport = page.getViewport({ scale: 1 });
+      const dpr = Math.max(1, window.devicePixelRatio || 1);
+      const scale = (containerW * dpr) / viewport.width;
+      return { scale, dpr, containerW, containerH: (viewport.height * (containerW / viewport.width)) };
+    }
+
+    async function renderPageToCanvas(pageNumber, canvasEl) {
+      const page = await pdfDoc.getPage(pageNumber);
+      const { scale, dpr, containerW, containerH } = computeScale(page);
+      const viewport = page.getViewport({ scale });
+      const context = canvasEl.getContext('2d', { alpha: false });
+
+      // Dimensioni in pixel reali del canvas
+      canvasEl.width = Math.floor(viewport.width);
+      canvasEl.height = Math.floor(viewport.height);
+      // Dimensioni CSS: adatta alla larghezza contenitore
+      canvasEl.style.width = `${Math.floor(containerW)}px`;
+      canvasEl.style.height = `${Math.floor(containerH)}px`;
+
+      const renderContext = { canvasContext: context, viewport };
+      await page.render(renderContext).promise;
+
+      // Aggiorna aspect-ratio dello stage dopo il primo render
+      stage.style.aspectRatio = `${Math.floor(viewport.width)}/${Math.floor(viewport.height)}`;
+    }
+
+    function updateButtons(){
+      prevBtn.disabled = currentPage <= 1 || animating;
+      nextBtn.disabled = currentPage >= totalPages || animating;
+      pageNumEl.textContent = String(currentPage);
+      pageCountEl.textContent = String(totalPages || '–');
+    }
+
+    async function goTo(pageNumber, direction) {
+      if (!pdfDoc) return;
+      const target = clamp(pageNumber, 1, totalPages);
+      if (target === currentPage || animating) return;
+      animating = true; updateButtons();
+
+      const nextSheetKey = active === 'A' ? 'B' : 'A';
+      const currSheet = sheets[active];
+      const nextSheet = sheets[nextSheetKey];
+
+      // Prepara i ruoli per l'animazione
+      currSheet.classList.add('current');
+      nextSheet.classList.add('next');
+
+      // Renderizza la pagina target sul foglio "next"
+      await renderPageToCanvas(target, canvases[nextSheetKey]);
+
+      // Trigger animazione
+      stage.classList.remove('anim-left','anim-right');
+      stage.classList.add(direction === 'forward' ? 'anim-left' : 'anim-right');
+
+      // Attendi fine animazione
+      const onAnimEnd = () => {
+        stage.removeEventListener('animationend', onAnimEnd, true);
+        // Pulisci classi e scambia i ruoli
+        currSheet.classList.remove('current');
+        nextSheet.classList.remove('next');
+        stage.classList.remove('anim-left','anim-right');
+        active = nextSheetKey;
+        currentPage = target;
+        animating = false;
+        updateButtons();
+        // Precarica la pagina successiva per fluidità
+        preloadAround();
+      };
+      stage.addEventListener('animationend', onAnimEnd, true);
+    }
+
+    function next(){ goTo(currentPage + 1, 'forward'); }
+    function prev(){ goTo(currentPage - 1, 'back'); }
+
+    // Precarica la pagina adiacente sull'altro canvas (senza mostrare)
+    let preloadTimeout;
+    async function preloadAround() {
+      clearTimeout(preloadTimeout);
+      preloadTimeout = setTimeout(async () => {
+        try {
+          const nextIdx = currentPage + 1;
+          if (nextIdx <= totalPages) {
+            const otherKey = active === 'A' ? 'B' : 'A';
+            await renderPageToCanvas(nextIdx, canvases[otherKey]);
+          }
+        } catch {}
+      }, 250);
+    }
+
+    // Gestione eventi UI
+    prevBtn.addEventListener('click', prev);
+    nextBtn.addEventListener('click', next);
+    window.addEventListener('keydown', e => {
+      if (e.key === 'ArrowRight') { e.preventDefault(); next(); }
+      if (e.key === 'ArrowLeft')  { e.preventDefault(); prev(); }
+    });
+
+    // Swipe touch
+    let touchX = null, touchY = null;
+    stage.addEventListener('touchstart', e => {
+      if (e.touches && e.touches[0]) { touchX = e.touches[0].clientX; touchY = e.touches[0].clientY; }
+    }, { passive: true });
+    stage.addEventListener('touchend', e => {
+      if (touchX == null) return;
+      const dx = (e.changedTouches[0]?.clientX || 0) - touchX;
+      const dy = (e.changedTouches[0]?.clientY || 0) - touchY;
+      if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)) {
+        if (dx < 0) next(); else prev();
+      }
+      touchX = touchY = null;
+    });
+
+    // Fullscreen
+    fsBtn.addEventListener('click', () => {
+      const el = document.documentElement;
+      if (!document.fullscreenElement) el.requestFullscreen?.();
+      else document.exitFullscreen?.();
+    });
+
+    // Riadatta su resize: ri-renderizza la pagina corrente sul foglio attivo
+    window.addEventListener('resize', () => {
+      if (!pdfDoc) return;
+      renderPageToCanvas(currentPage, canvases[active]);
+    });
+
+    // Avvio
+    (async function init(){
+      if (!PDF_URL || PDF_URL === 'INSERISCI_QUI_IL_TUO_LINK_AL_PDF') {
+        loadingEl.textContent = 'Imposta l\'URL del PDF (parametro ?src o costante FALLBACK_PDF_URL).';
+        return;
+      }
+      try {
+        pdfDoc = await pdfjsLib.getDocument({ url: PDF_URL, withCredentials: false }).promise;
+        totalPages = pdfDoc.numPages;
+        pageCountEl.textContent = String(totalPages);
+        await renderPageToCanvas(currentPage, canvases[active]);
+        loadingEl.remove();
+        updateButtons();
+        preloadAround();
+      } catch (err) {
+        console.error(err);
+        loadingEl.textContent = 'Errore nel caricamento del PDF. Verifica il link o i permessi di condivisione.';
+      }
+    })();
+  </script>
+</body>
+</html>
